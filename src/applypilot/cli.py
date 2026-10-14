@@ -530,5 +530,32 @@ def discover_hk(
     console.print(f"[green][OK] HK Discovery complete: {res['total']} found, {res['new']} new, {res['existing']} existing in database.[/green]")
 
 
+@app.command("export")
+def export_cmd(
+    status: str = typer.Option("all", "--status", "-s", help="Queue filter: all, ready, needs_auth, applied, failed, scored."),
+    min_score: Optional[int] = typer.Option(None, "--min-score", "-m", help="Minimum fit score filter (1-10)."),
+    format: str = typer.Option("csv", "--format", "-f", help="Output format: csv, json, md."),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Custom destination file path."),
+) -> None:
+    """Export job application queue to CSV, JSON, or Markdown for spreadsheets or Notion."""
+    _bootstrap()
+    from applypilot.database import export_jobs
+
+    valid_formats = ("csv", "json", "md", "markdown")
+    if format.lower() not in valid_formats:
+        console.print(f"[red]Invalid format:[/red] '{format}'. Choose from: csv, json, md")
+        raise typer.Exit(code=1)
+
+    out_file, count = export_jobs(
+        status=status,
+        min_score=min_score,
+        output_path=output,
+        format=format,
+    )
+    console.print(f"[green][OK] Successfully exported {count} job(s) ({status}) to:[/green] [bold cyan]{out_file}[/bold cyan]")
+    if format.lower() == "csv":
+        console.print("[dim]Tip: You can directly import this CSV into Notion 'Job Hunting 2026' or open in Excel.[/dim]")
+
+
 if __name__ == "__main__":
     app()

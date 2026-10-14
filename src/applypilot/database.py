@@ -472,3 +472,126 @@ def resume_all_auth_jobs(conn: sqlite3.Connection | None = None) -> int:
     """)
     conn.commit()
     return cur.rowcount
+
+
+def export_jobs(
+    status: str = "all",
+    min_score: int | None = None,
+    output_path: Path | str | None = None,
+    format: str = "csv",
+    conn: sqlite3.Connection | None = None,
+) -> tuple[Path, int]:
+    """Export application queue and jobs to CSV, JSON, or Markdown.
+
+    Args:
+        status: Queue filter ('all', 'ready', 'needs_auth', 'applied', 'failed', 'scored').
+        min_score: Optional minimum fit_score filter (1-10).
+        output_path: Destination file path. If None, defaults to ~/.applypilot/applications_<status>_<timestamp>.<ext>.
+        format: 'csv', 'json', or 'md'/'markdown'.
+        conn: Optional SQLite connection.
+
+    Returns:
+        tuple of (saved_file_path, exported_row_count).
+    """
+    import csv
+    import json
+    from applypilot.config import APP_DIR
+
+    if conn is None:
+        conn = get_connection()
+
+    where_clauses: list[str] = []
+    params: list = []
+
+    status_lower = (status or "all").lower()
+    if status_lower == "ready":
+        where_clauses.append("tailored_resume_path IS NOT NULL AND applied_at IS NULL AND (apply_status IS NULL OR apply_status != 'needs_auth')")
+    elif status_lower == "needs_auth":
+        where_clauses.append("apply_status = 'needs_auth'")
+    elif status_lower == "applied":
+        where_clauses.append("(applied_at IS NOT NULL OR apply_status = 'applied')")
+    elif status_lower == "failed":
+        where_clauses.append("apply_status = 'failed'")
+    elif status_lower == "scored":
+        where_clauses.append("fit_score IS NOT NULL")
+    elif status_lower != "all":
+        where_clauses.append("apply_status = ?")
+        params.append(status_lower)
+
+    if min_score is not None:
+        where_clauses.append("fit_score >= ?")
+        params.append(min_score)
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    query = f"""
+        SELECT 
+            title,
+            site,
+            salary,
+            location,
+            fit_score,
+            COALESCE(apply_status, CASE WHEN tailored_resume_path IS NOT NULL AND applied_at IS NULL THEN 'ready' ELSE 'discovered' END) AS status,
+            url,
+            portal_url,
+            application_url,
+            tailored_resume_path,
+            cover_letter_path,
+            applied_at,
+            auth_prompted_at,
+            auth_note,
+            score_reasoning,
+            discovered_at
+        FROM jobs
+        {where_sql}
+        ORDER BY CASE WHEN fit_score IS NULL THEN 1 ELSE 0 END, fit_score DESC, discovered_at DESC
+    """
+    cursor = conn.execute(query, params)
+    rows = cursor.fetchall()
+    data = [dict(r) for r in rows]
+
+    fmt = format.lower()
+    ext = "md" if fmt in ("md", "markdown") else ("json" if fmt == "json" else "csv")
+    if output_path:
+        out = Path(output_path)
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out = APP_DIR / f"applications_{status_lower}_{timestamp}.{ext}"
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    if fmt == "json":
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    elif fmt in ("md", "markdown"):
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(f"# Job Applications Queue Export ({status_lower.upper()})\n\n")
+            f.write(f"- Total jobs: {len(data)}\n")
+            f.write(f"- Exported at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            if data:
+                headers = ["Title", "Site / Company", "Score", "Status", "Portal / URL", "Resume"]
+                f.write("| " + " | ".join(headers) + " |\n")
+                f.write("| " + " | ".join(["---"] * len(headers)) + " |\n")
+                for item in data:
+                    title_clean = (item.get("title") or "Untitled").replace("|", "-")
+                    site_clean = (item.get("site") or "").replace("|", "-")
+                    score_clean = str(item.get("fit_score") or "-")
+                    status_clean = item.get("status") or ""
+                    url_clean = item.get("portal_url") or item.get("application_url") or item.get("url") or ""
+                    url_display = f"[{site_clean or 'Link'}]({url_clean})" if url_clean else "-"
+                    resume_clean = Path(item["tailored_resume_path"]).name if item.get("tailored_resume_path") else "-"
+                    f.write(f"| {title_clean} | {site_clean} | {score_clean} | {status_clean} | {url_display} | {resume_clean} |\n")
+    else:  # csv with utf-8-sig for Excel & Notion compatibility
+        fieldnames = [
+            "title", "site", "salary", "location", "fit_score", "status",
+            "url", "portal_url", "application_url", "tailored_resume_path",
+            "cover_letter_path", "applied_at", "auth_prompted_at", "auth_note",
+            "score_reasoning", "discovered_at"
+        ]
+        with open(out, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in data:
+                writer.writerow(row)
+
+    return out, len(data)
+

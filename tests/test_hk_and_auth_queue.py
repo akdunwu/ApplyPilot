@@ -127,6 +127,55 @@ class TestHKAndAuthQueue(unittest.TestCase):
         self.assertTrue(callable(scrape_offertoday))
         self.assertTrue(callable(discover_hk_jobs))
 
+    def test_export_jobs_csv_json_md(self):
+        """Verify export_jobs correctly filters and writes CSV, JSON, and Markdown formats."""
+        from applypilot.database import export_jobs
+        import json
+        import csv
+
+        conn = get_connection(self.db_path)
+        conn.execute("""
+            INSERT INTO jobs (url, title, site, tailored_resume_path, fit_score, apply_status, applied_at)
+            VALUES 
+                ('https://jobs.example.com/job1', 'AI Engineer', 'Company A', '/path/resume1.pdf', 9, 'ready', NULL),
+                ('https://jobs.example.com/job2', 'FinTech Dev', 'Company B', '/path/resume2.pdf', 8, 'applied', '2026-10-14'),
+                ('https://jobs.example.com/job3', 'Data Scientist', 'Company C', '/path/resume3.pdf', 6, 'needs_auth', NULL)
+        """)
+        conn.commit()
+
+        # 1. Export CSV with min_score filter
+        csv_file = self.db_path.parent / "test_export.csv"
+        out_csv, count = export_jobs(status="all", min_score=8, output_path=csv_file, format="csv", conn=conn)
+        self.assertEqual(count, 2)
+        self.assertTrue(out_csv.exists())
+        with open(out_csv, "r", encoding="utf-8-sig") as f:
+            reader = list(csv.DictReader(f))
+            self.assertEqual(len(reader), 2)
+            self.assertEqual(reader[0]["title"], "AI Engineer")
+
+        # 2. Export JSON with status filter
+        json_file = self.db_path.parent / "test_export.json"
+        out_json, count = export_jobs(status="applied", output_path=json_file, format="json", conn=conn)
+        self.assertEqual(count, 1)
+        with open(out_json, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            self.assertEqual(len(data), 1)
+            self.assertEqual(data[0]["title"], "FinTech Dev")
+
+        # 3. Export Markdown
+        md_file = self.db_path.parent / "test_export.md"
+        out_md, count = export_jobs(status="all", output_path=md_file, format="md", conn=conn)
+        self.assertEqual(count, 3)
+        with open(out_md, "r", encoding="utf-8") as f:
+            content = f.read()
+            self.assertIn("| Title | Site / Company | Score |", content)
+            self.assertIn("AI Engineer", content)
+
+        # Cleanup test files
+        for p in (csv_file, json_file, md_file):
+            if p.exists():
+                p.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()
