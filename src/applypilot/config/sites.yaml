@@ -52,8 +52,24 @@ base_urls:
   "Himalayas": "https://himalayas.app"
   "Techstars Jobs": "https://www.techstars.com"
   "Randstad Canada": "https://www.randstad.ca/jobs/search/"
+  "JobsDB Hong Kong": "https://hk.jobsdb.com"
+  "eFinancialCareers HK": "https://www.efinancialcareers.hk"
+  "OfferToday": "https://www.offertoday.com"
 
 sites:
+  # ── Hong Kong-specific ──────────────────────────────────────────────
+  - name: "JobsDB Hong Kong"
+    url: "https://hk.jobsdb.com/jobs?keywords={query_encoded}&where=Hong+Kong"
+    type: search
+
+  - name: "eFinancialCareers HK"
+    url: "https://www.efinancialcareers.hk/jobs?q={query_encoded}&countryCode=HK"
+    type: search
+
+  - name: "OfferToday"
+    url: "https://www.offertoday.com/jobs?keyword={query_encoded}"
+    type: search
+
   # ── Searchable sites (URL includes query + location params) ──────────
   # Canada-specific
   - name: "Eluta"

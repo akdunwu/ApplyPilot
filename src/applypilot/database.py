@@ -129,7 +129,10 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             last_attempted_at     TEXT,
             apply_duration_ms     INTEGER,
             apply_task_id         TEXT,
-            verification_confidence TEXT
+            verification_confidence TEXT,
+            portal_url            TEXT,
+            auth_prompted_at      TEXT,
+            auth_note             TEXT
         )
     """)
     conn.commit()
@@ -180,6 +183,9 @@ _ALL_COLUMNS: dict[str, str] = {
     "apply_duration_ms": "INTEGER",
     "apply_task_id": "TEXT",
     "verification_confidence": "TEXT",
+    "portal_url": "TEXT",
+    "auth_prompted_at": "TEXT",
+    "auth_note": "TEXT",
 }
 
 
@@ -422,3 +428,47 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
         columns = rows[0].keys()
         return [dict(zip(columns, row)) for row in rows]
     return []
+
+
+def get_pending_auth_jobs(conn: sqlite3.Connection | None = None) -> list[dict]:
+    """Return all jobs currently waiting for user manual login."""
+    if conn is None:
+        conn = get_connection()
+    rows = conn.execute("""
+        SELECT url, title, site, application_url, portal_url, auth_prompted_at, auth_note, fit_score
+        FROM jobs
+        WHERE apply_status = 'needs_auth'
+        ORDER BY auth_prompted_at DESC, fit_score DESC
+    """).fetchall()
+    if rows:
+        cols = rows[0].keys()
+        return [dict(zip(cols, r)) for r in rows]
+    return []
+
+
+def resume_auth_job(target: str, conn: sqlite3.Connection | None = None) -> bool:
+    """Resume a specific job from needs_auth state back into ready queue."""
+    if conn is None:
+        conn = get_connection()
+    like = f"%{target.split('?')[0].rstrip('/')}%"
+    cur = conn.execute("""
+        UPDATE jobs
+        SET apply_status = NULL, apply_error = NULL, agent_id = NULL
+        WHERE apply_status = 'needs_auth'
+          AND (url = ? OR application_url = ? OR portal_url = ? OR url LIKE ? OR application_url LIKE ?)
+    """, (target, target, target, like, like))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def resume_all_auth_jobs(conn: sqlite3.Connection | None = None) -> int:
+    """Resume all jobs from needs_auth state back into ready queue."""
+    if conn is None:
+        conn = get_connection()
+    cur = conn.execute("""
+        UPDATE jobs
+        SET apply_status = NULL, apply_error = NULL, agent_id = NULL
+        WHERE apply_status = 'needs_auth'
+    """)
+    conn.commit()
+    return cur.rowcount

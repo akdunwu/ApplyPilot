@@ -565,15 +565,19 @@ If something unexpected happens and these instructions don't cover it, figure it
    - send_email with subject "Application for {job['title']} -- {display_name}", body = 2-3 sentence pitch + contact info, attach resume PDF: ["{pdf_path}"]
    - Output RESULT:APPLIED. Done.
    After clicking Apply: browser_snapshot. Run CAPTCHA DETECT -- many sites trigger CAPTCHAs right after the Apply click. If found, solve before continuing.
-5. Login wall?
+5. Login wall / Employer portal registration?
    5a. FIRST: check the URL. If you landed on {', '.join(blocked_sso)}, or any SSO/OAuth page -> STOP. Output RESULT:FAILED:sso_required. Do NOT try to sign in to Google/Microsoft/SSO.
    5b. Check for popups. Run browser_tabs action "list". If a new tab/window appeared (login popup), switch to it with browser_tabs action "select". Check the URL there too -- if it's SSO -> RESULT:FAILED:sso_required.
-   5c. Regular login form (employer's own site)? Try sign in: {personal['email']} / {personal.get('password', '')}
-   5d. After clicking Login/Sign-in: run CAPTCHA DETECT. Login pages frequently have invisible CAPTCHAs that silently block form submissions. If found, solve it then retry login.
-   5e. Sign in failed? Try sign up with same email and password.
-   5f. Need email verification? Use search_emails + read_email to get the code.
-   5g. After login, run browser_tabs action "list" again. Switch back to the application tab if needed.
-   5h. All failed? Output RESULT:FAILED:login_issue. Do not loop.
+   5c. Employer portal (Workday, Taleo, SuccessFactors, iCIMS, or company self-hosted career site)?
+       - If you are redirected to an employer self-hosted portal requiring an account / login, or if auto-signup fails/requires manual account setup:
+       - Get the exact current URL (use browser_tabs or the navigation URL).
+       - Output: RESULT:NEEDS_AUTH:<CURRENT_URL>:<Short Reason> (e.g. RESULT:NEEDS_AUTH:https://example.wd3.myworkdayjobs.com/login:Workday login required)
+       - Do NOT output RESULT:FAILED. The system will prompt the user to log in and keep other tasks moving!
+   5d. Regular login form? Try sign in: {personal['email']} / {personal.get('password', '')}
+   5e. After clicking Login/Sign-in: run CAPTCHA DETECT. Login pages frequently have invisible CAPTCHAs that silently block form submissions. If found, solve it then retry login.
+   5f. Sign in failed? Try sign up with same email and password.
+   5g. Need email verification? Use search_emails + read_email to get the code.
+   5h. All failed? Output RESULT:NEEDS_AUTH:<CURRENT_URL>:Manual registration or login required. Do not loop.
 6. Upload resume. ALWAYS upload fresh -- delete any existing resume first, then browser_file_upload with the PDF path above. This is the tailored resume for THIS job. Non-negotiable.
 7. Upload cover letter if there's a field for it. Text field -> paste the cover letter text. File upload -> use the cover letter PDF path.
 8. Check ALL pre-filled fields. ATS systems parse your resume and auto-fill -- it's often WRONG.
@@ -589,6 +593,7 @@ RESULT:APPLIED -- submitted successfully
 RESULT:EXPIRED -- job closed or no longer accepting applications
 RESULT:CAPTCHA -- blocked by unsolvable captcha
 RESULT:LOGIN_ISSUE -- could not sign in or create account
+RESULT:NEEDS_AUTH:<portal_url>:<note> -- employer portal requires manual user registration or login
 RESULT:FAILED:not_eligible_location -- onsite outside acceptable area, no remote option
 RESULT:FAILED:not_eligible_work_auth -- requires unauthorized work location
 RESULT:FAILED:reason -- any other failure (brief reason)

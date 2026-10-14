@@ -453,5 +453,82 @@ def doctor() -> None:
     console.print()
 
 
+@app.command("auth-queue")
+def auth_queue() -> None:
+    """View jobs suspended and waiting for manual employer portal login."""
+    _bootstrap()
+    from applypilot.database import get_pending_auth_jobs
+    jobs = get_pending_auth_jobs()
+    if not jobs:
+        console.print("[green][OK] No jobs currently waiting for manual portal authentication.[/green]")
+        return
+
+    table = Table(title="Jobs Awaiting Employer Portal Login", show_lines=True)
+    table.add_column("Score", style="bold green", width=6)
+    table.add_column("Company / Site", style="cyan", width=22)
+    table.add_column("Job Title", style="white", width=30)
+    table.add_column("Portal Login URL", style="yellow")
+    table.add_column("Prompted At", style="dim", width=20)
+
+    for j in jobs:
+        score_str = f"{j.get('fit_score', 'N/A')}/10"
+        url_display = j.get("portal_url") or j.get("application_url") or j.get("url")
+        prompted = (j.get("auth_prompted_at") or "")[:19].replace("T", " ")
+        table.add_row(
+            score_str,
+            j.get("site", "Unknown"),
+            j.get("title", "Untitled")[:30],
+            url_display,
+            prompted,
+        )
+
+    console.print()
+    console.print(table)
+    console.print("\n[dim]Instructions: Log in to the portal in your browser, then run: [bold cyan]applypilot resume <URL>[/bold cyan] or [bold cyan]applypilot resume --all[/bold cyan][/dim]\n")
+
+
+@app.command("resume")
+def resume(
+    target: Optional[str] = typer.Argument(None, help="Job URL or keyword to resume from auth-queue."),
+    all_jobs: bool = typer.Option(False, "--all", "-a", help="Resume all suspended jobs."),
+) -> None:
+    """Resume jobs from auth-queue back into active application queue."""
+    _bootstrap()
+    from applypilot.database import resume_auth_job, resume_all_auth_jobs
+
+    if all_jobs:
+        count = resume_all_auth_jobs()
+        if count:
+            console.print(f"[green][OK] Successfully resumed {count} job(s) from auth-queue. They are now eligible for auto-apply.[/green]")
+        else:
+            console.print("[dim]No suspended jobs found in auth-queue.[/dim]")
+    elif target:
+        ok = resume_auth_job(target)
+        if ok:
+            console.print(f"[green][OK] Successfully resumed job '{target}'.[/green]")
+        else:
+            console.print(f"[yellow]No matching job in 'needs_auth' state found for '{target}'.[/yellow]")
+    else:
+        console.print("[yellow]Please specify a target URL or pass --all to resume all suspended jobs.[/yellow]")
+
+
+@app.command("discover-hk")
+def discover_hk(
+    query: Optional[str] = typer.Option(None, "--query", "-q", help="Search query (e.g. 'AI Architect')."),
+    platform: Optional[str] = typer.Option(None, "--platform", "-p", help="Platform: jobsdb, efinancialcareers, offertoday, or all."),
+    limit: int = typer.Option(20, "--limit", "-l", help="Results per platform."),
+) -> None:
+    """Run job discovery on Hong Kong portals (JobsDB, eFinancialCareers, OfferToday)."""
+    _bootstrap()
+    from applypilot.discovery.hk_portals import discover_hk_jobs
+
+    queries = [query] if query else None
+    platforms = [platform] if platform and platform != "all" else ["jobsdb", "efinancialcareers", "offertoday"]
+
+    console.print(f"[bold]Starting Hong Kong portal discovery...[/bold] Platforms: {', '.join(platforms)}")
+    res = discover_hk_jobs(queries=queries, platforms=platforms, results_per_platform=limit)
+    console.print(f"[green][OK] HK Discovery complete: {res['total']} found, {res['new']} new, {res['existing']} existing in database.[/green]")
+
+
 if __name__ == "__main__":
     app()

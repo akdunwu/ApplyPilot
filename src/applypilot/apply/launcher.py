@@ -290,6 +290,56 @@ def reset_failed() -> int:
     return cursor.rowcount
 
 
+def _notify_manual_auth(title: str, company: str, portal_url: str, note: str) -> None:
+    """Prompt user to log into an employer portal via terminal banner and desktop alert."""
+    msg = (
+        f"\n{'!' * 70}\n"
+        f"🔔 [ACTION REQUIRED] Employer portal account/login required!\n"
+        f"   Job: {title}\n"
+        f"   Company: {company}\n"
+        f"   Note: {note}\n"
+        f"   Portal URL: {portal_url}\n"
+        f"   Instructions: Please open this URL in your browser and complete login.\n"
+        f"                 ApplyPilot is continuing other applications in parallel.\n"
+        f"                 When logged in, run: applypilot resume \"{portal_url}\"\n"
+        f"{'!' * 70}\n"
+    )
+    logger.warning(msg)
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        c = Console()
+        c.print(Panel(
+            f"[bold yellow]Employer Portal Login Required[/bold yellow]\n\n"
+            f"[bold]Job:[/bold] {title} @ {company}\n"
+            f"[bold]Portal URL:[/bold] [link={portal_url}]{portal_url}[/link]\n"
+            f"[dim]Note: {note}[/dim]\n\n"
+            f"[green][OK] Other jobs are continuing in parallel without stalling.[/green]\n"
+            f"Once you log in, run: [bold cyan]applypilot resume \"{portal_url}\"[/bold cyan] (or [bold cyan]applypilot resume --all[/bold cyan])",
+            title="[!] Human-In-The-Loop Action Needed",
+            border_style="yellow",
+        ))
+    except Exception:
+        pass
+
+    if platform.system() == "Windows":
+        try:
+            ps_script = (
+                "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; "
+                "$template = [Windows.UI.Notifications.ToastTemplateType]::ToastText02; "
+                "$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent($template); "
+                "$textNodes = $xml.GetElementsByTagName('text'); "
+                f"$textNodes.Item(0).AppendChild($xml.CreateTextNode('ApplyPilot: Login Needed')) > $null; "
+                f"$textNodes.Item(1).AppendChild($xml.CreateTextNode('{company}: {title}')) > $null; "
+                "$toast = [Windows.UI.Notifications.ToastNotification]::new($xml); "
+                "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('ApplyPilot').Show($toast);"
+            )
+            subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Per-job execution
 # ---------------------------------------------------------------------------
@@ -300,7 +350,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
 
     Returns:
         Tuple of (status_string, duration_ms). Status is one of:
-        'applied', 'expired', 'captcha', 'login_issue',
+        'applied', 'expired', 'captcha', 'login_issue', 'needs_auth',
         'failed:reason', or 'skipped'.
     """
     # Read tailored resume text
@@ -465,6 +515,42 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         def _clean_reason(s: str) -> str:
             return re.sub(r'[*`"]+$', '', s).strip()
 
+        # Check for RESULT:NEEDS_AUTH (asynchronous manual login request)
+        if "RESULT:NEEDS_AUTH" in output:
+            portal_url = job.get("application_url") or job["url"]
+            auth_note = "Employer portal account required"
+            for out_line in output.split("\n"):
+                if "RESULT:NEEDS_AUTH" in out_line:
+                    raw_payload = out_line.split("RESULT:NEEDS_AUTH")[-1].strip(": \t")
+                    if raw_payload:
+                        parts = raw_payload.split(":", 1)
+                        if parts[0].startswith("http"):
+                            portal_url = parts[0].strip()
+                            if len(parts) > 1:
+                                auth_note = parts[1].strip()
+                        else:
+                            auth_note = raw_payload
+                    break
+
+            conn = get_connection()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            conn.execute("""
+                UPDATE jobs
+                SET apply_status = 'needs_auth',
+                    portal_url = ?,
+                    auth_prompted_at = ?,
+                    auth_note = ?,
+                    agent_id = NULL,
+                    apply_duration_ms = ?
+                WHERE url = ?
+            """, (portal_url, now_iso, auth_note, duration_ms, job["url"]))
+            conn.commit()
+
+            add_event(f"[W{worker_id}] NEEDS_AUTH: {job['title'][:30]} @ {job.get('site', '')}")
+            update_state(worker_id, status="needs_auth", last_action=f"NEEDS_AUTH ({elapsed}s)")
+            _notify_manual_auth(job["title"], job.get("site", "Employer Portal"), portal_url, auth_note)
+            return "needs_auth", duration_ms
+
         for result_status in ["APPLIED", "EXPIRED", "CAPTCHA", "LOGIN_ISSUE"]:
             if f"RESULT:{result_status}" in output:
                 add_event(f"[W{worker_id}] {result_status} ({elapsed}s): {job['title'][:30]}")
@@ -613,6 +699,11 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 applied += 1
                 update_state(worker_id, jobs_applied=applied,
                              jobs_done=applied + failed)
+            elif result == "needs_auth":
+                add_event(f"[W{worker_id}] Suspended for login: {job['title'][:30]}")
+                update_state(worker_id, last_action="Awaiting manual login")
+                # Do NOT mark as failed. Worker immediately loops to next job!
+                continue
             else:
                 reason = result.split(":", 1)[-1] if ":" in result else result
                 mark_result(job["url"], "failed", reason,

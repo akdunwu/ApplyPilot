@@ -374,7 +374,15 @@ def _full_crawl(
     # Build search combinations from config
     queries = search_cfg.get("queries", [])
     locs = search_cfg.get("locations", [])
-    defaults = search_cfg.get("defaults", {})
+    defaults = search_cfg.get("defaults", {}).copy()
+    country_cfg = search_cfg.get("country")
+    if country_cfg:
+        c_lower = country_cfg.strip().lower()
+        if c_lower in ("hong kong", "hk"):
+            defaults["country_indeed"] = "hong kong"
+        else:
+            defaults["country_indeed"] = c_lower
+
     glassdoor_map = search_cfg.get("glassdoor_location_map", {})
     accept_locs, reject_locs = _load_location_config(search_cfg)
 

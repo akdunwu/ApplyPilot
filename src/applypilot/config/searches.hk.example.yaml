@@ -1,0 +1,92 @@
+# ApplyPilot search configuration — Hong Kong Edition
+# Copy to ~/.applypilot/searches.yaml and customize for your HK job hunt.
+
+# Search queries -- tailored for AI Architecture, Cloud Solutions, and FinTech roles in Hong Kong
+queries:
+  # Tier 1: High-priority exact target matches (AI & Agentic Architect, Cloud Solutions)
+  - query: "AI Architect"
+    tier: 1
+  - query: "Solutions Architect"
+    tier: 1
+  - query: "Enterprise Architect"
+    tier: 1
+  - query: "Cloud Architect"
+    tier: 1
+  - query: "FinTech Solutions Architect"
+    tier: 1
+
+  # Tier 2: Strong matches, tech lead & senior engineering roles
+  - query: "AI Engineer"
+    tier: 2
+  - query: "Lead Software Engineer"
+    tier: 2
+  - query: "Principal Engineer"
+    tier: 2
+  - query: "Cloud Engineer"
+    tier: 2
+  - query: "Quantitative Developer"
+    tier: 2
+  - query: "Technical Lead"
+    tier: 2
+
+  # Tier 3: Wider net, broader IT & engineering roles
+  - query: "Data Architect"
+    tier: 3
+  - query: "Machine Learning Engineer"
+    tier: 3
+  - query: "Senior Backend Developer"
+    tier: 3
+  - query: "DevOps Architect"
+    tier: 3
+
+# Locations to search
+locations:
+  - location: "Hong Kong"
+    remote: false
+  - location: "Remote"
+    remote: true
+
+# Location filtering -- accept/reject patterns for job location text in HK
+location:
+  accept_patterns:
+    - "Hong Kong"
+    - "HK"
+    - "Kowloon"
+    - "Central"
+    - "Admiralty"
+    - "Wan Chai"
+    - "Quarry Bay"
+    - "Taikoo"
+    - "Cyberport"
+    - "Science Park"
+    - "Sha Tin"
+    - "Kwun Tong"
+    - "Tsim Sha Tsui"
+    - "TST"
+    - "Remote"
+    - "Anywhere"
+  reject_patterns:
+    - "Singapore only"
+    - "Mainland China only"
+    - "Beijing only"
+    - "Shanghai only"
+    - "Shenzhen only"
+    - "London only"
+    - "Tokyo only"
+    - "Sydney only"
+
+# Country for Indeed/LinkedIn/Google Jobs searches via JobSpy
+country: "Hong Kong"
+
+# Source boards to include
+boards:
+  - linkedin
+  - indeed
+  - jobsdb
+  - efinancialcareers
+  - offertoday
+
+# Search defaults
+defaults:
+  results_per_site: 50   # Max results per board per query
+  hours_old: 96          # Jobs posted within 4 days
